@@ -16,7 +16,11 @@ typealias RecordSorter = Comparator<Record>
 
 typealias SortingFieldsExtractor = (Record) -> Record
 
-fun List<LinkedList<*>>.anyNotEmpty() = any { it.peek() != null }
+typealias Chunks<T> = List<LinkedList<T>>
+
+fun Chunks<*>.anyNotEmpty() = any { it.peek() != null }
+
+fun <T> Chunks<T>.consume(t: T) = filter { it.peek() == t }.forEach { it.poll() }
 
 class Shard(private val id: String, var online: Boolean = true) {
 
@@ -40,7 +44,7 @@ class Shard(private val id: String, var online: Boolean = true) {
         emptyList()
     }
 
-    fun getLastResultWindow(window: ResultWindow) = lastResult.subList(window.skip, window.skip + window.keep)
+    fun getWindowFromLastResult(boundary: WindowBoundary) = lastResult.subList(boundary.skip, boundary.skip + boundary.keep)
 }
 
 class Coordinator(shardCount: Int, private val replicationFactor: Int) {
@@ -70,20 +74,20 @@ class Coordinator(shardCount: Int, private val replicationFactor: Int) {
 
     fun query(page: Int, pageSize: Int, filter: RecordFilter, order: RecordSorter, transformer: SortingFieldsExtractor): List<Record> {
         val partials = shards.map { LinkedList(it.query(filter, order, transformer, (page + 1) * pageSize)) }
-        val windows = combine(partials, page, pageSize, order)
-        val shardResults = shards.zip(windows)
-            .map { (shard, window) -> LinkedList(shard.getLastResultWindow(window)) }
+        val boundaries = combine(partials, page, pageSize, order)
+        val shardResults = shards.zip(boundaries)
+            .map { (shard, boundary) -> LinkedList(shard.getWindowFromLastResult(boundary)) }
         return combineResults(shardResults, page, pageSize, order)
     }
 
-    private fun combine(results: List<LinkedList<Record>>, page: Int, pageSize: Int, order: RecordSorter) =
+    private fun combine(results: Chunks<Record>, page: Int, pageSize: Int, order: RecordSorter) =
         SortingKeysMerger(results, order, page * pageSize, (page + 1) * pageSize).merge()
 
-    private fun combineResults(shardResults: List<LinkedList<Record>>, page: Int, pageSize: Int, order: RecordSorter) =
+    private fun combineResults(shardResults: Chunks<Record>, page: Int, pageSize: Int, order: RecordSorter) =
         ResultsMerger(shardResults, order, page * pageSize).merge()
 }
 
-abstract class ChunksMerger<T>(protected val chunks: List<LinkedList<Record>>, private val sorter: RecordSorter) {
+abstract class ChunksMerger<T>(protected val chunks: Chunks<Record>, private val sorter: RecordSorter) {
 
     protected abstract val result: T
 
@@ -91,8 +95,7 @@ abstract class ChunksMerger<T>(protected val chunks: List<LinkedList<Record>>, p
         while (!done() && chunks.anyNotEmpty()) {
             val element = nextInOrder()
             update(element)
-            chunks.filter { it.peek() == element }
-                .forEach { it.poll() }
+            chunks.consume(element)
         }
         return result
     }
@@ -107,10 +110,10 @@ abstract class ChunksMerger<T>(protected val chunks: List<LinkedList<Record>>, p
     protected abstract fun update(element: Record)
 }
 
-class SortingKeysMerger(chunks: List<LinkedList<Record>>, sorter: RecordSorter, private val from: Int, private val upTo: Int): ChunksMerger<List<ResultWindow>>(chunks, sorter) {
+class SortingKeysMerger(chunks: Chunks<Record>, sorter: RecordSorter, private val from: Int, private val upTo: Int): ChunksMerger<List<WindowBoundary>>(chunks, sorter) {
 
     private var count = 0
-    override val result = List(chunks.size) { ResultWindow() }
+    override val result = List(chunks.size) { WindowBoundary() }
 
     override fun done() = count >= upTo
 
@@ -126,7 +129,7 @@ class SortingKeysMerger(chunks: List<LinkedList<Record>>, sorter: RecordSorter, 
     }
 }
 
-class ResultsMerger(chunks: List<LinkedList<Record>>, sorter: RecordSorter, private val upTo: Int): ChunksMerger<List<Record>>(chunks, sorter) {
+class ResultsMerger(chunks: Chunks<Record>, sorter: RecordSorter, private val upTo: Int): ChunksMerger<List<Record>>(chunks, sorter) {
 
     override val result = mutableListOf<Record>()
 
@@ -137,7 +140,7 @@ class ResultsMerger(chunks: List<LinkedList<Record>>, sorter: RecordSorter, priv
     }
 }
 
-class ResultWindow {
+class WindowBoundary {
     var skip = 0
         private set(value) {
             field = value
