@@ -1,0 +1,42 @@
+buildscript {
+    ext {
+        kotlinVersion = '1.2.50-eap-17'
+    }
+    repositories {
+        mavenCentral()
+        maven { url = 'https://dl.bintray.com/kotlin/kotlin-eap/' }
+    }
+    dependencies {
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
+    }
+}
+
+apply plugin: 'kotlin'
+
+group = 'ar.com.agomez'
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = 1.8
+
+compileKotlin {
+    kotlinOptions {
+        freeCompilerArgs = ["-Xjsr305=strict"]
+        jvmTarget = "1.8"
+    }
+}
+
+compileTestKotlin {
+    kotlinOptions {
+        freeCompilerArgs = ["-Xjsr305=strict"]
+        jvmTarget = "1.8"
+    }
+}
+
+repositories {
+    jcenter()
+    maven { url = 'https://dl.bintray.com/kotlin/kotlin-eap/' }
+    mavenCentral()
+}
+
+dependencies {
+    compile("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+}
